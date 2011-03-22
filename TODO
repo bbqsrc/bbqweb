@@ -1,0 +1,20 @@
+bbqweb: bbqsrc CMS
+
+Language: Python
+Templating system: Mako (http://www.makotemplates.org/)
+Backend database: Sqlite3
+Comments: Disqus (shortname: bbqsrc)
+
+Functions:
+* Generate pages
+  - title page
+    - menu
+  - subpages
+* Reorder pages
+  - up
+  - down
+  - date
+  - alphabetically
+
+<noscript>/p/somefile.html</noscript>
+XMLHttpRequest get somefile.div.html
