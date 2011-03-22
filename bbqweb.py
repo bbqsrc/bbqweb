@@ -44,8 +44,9 @@ class Page(SqlBase):
 			self.base = base
 	
 class Bbqweb(object):
-	def __init__(self, db):
+	def __init__(self, db, outdir):
 		#try:
+		# TODO: add base check, enforce adding base
 		if True:
 			engine = create_engine("sqlite:///%s" % db)
 			Session = sessionmaker(bind=engine)
@@ -53,31 +54,68 @@ class Bbqweb(object):
 			self.session = Session()
 			SqlBase.metadata.create_all()
 		#except:
+		self.outdir = outdir
+		self.templates = TemplateLookup()
+		for row in self.session.query(Base):
+			self.templates.put_string(row.name, row.content)
 		#	print "Error TODO MAX ERRORS OUT TO THE MAX"
 	def selection(self):
 		select = {
+			'g': self.generate,
 			'1': self.add_page,
 			'2': self.add_base,
 			'q': self.conclude
 		}
 		while True:
+			print "-------------"
 			print "bbqweb alpha."
 			print "-------------"
 			print ""
 			print "Options:"
+			print "  (g) generate website"
 			print "  (1) add page"
 			print "  (2) add base"
-			print "  (3) show pages"
-			print "  (4) show bases"
+			print "  (*) show pages"
+			print "  (*) show bases"
 			print "  (q) quit"
 			print ""
 			print "Make a selection: ",
 			select.get(raw_input(), lambda: None)()
+			print ""
 		
 	def conclude(self):
 		self.session.commit()
 		self.session.close()
 		sys.exit()
+
+	def generate(self):
+		#TODO outdir checks
+		print "Order by:"
+		print "  (1) title"
+		print "  (2) created date"
+		print ""
+		x = raw_input("Selection: ")
+		if x == '1':
+			x = Page.title
+		elif x == '2':
+			x = Page.created
+		else:
+			print "Poor selection."
+			return
+		t = self.templates.get_template("index")
+		args = []
+		for row in self.session.query(Page).order_by(x):
+			args.append([row.link, row.title, row.file])
+			f = open("%s/%s" % (self.outdir, row.file), 'wb')
+			f.write(row.content)
+			f.close()
+			print "File %s written." % row.file
+		index_content = t.render(rows=args)
+		f = open("%s/index.shtml" % self.outdir, 'wb')
+		f.write(index_content)
+		f.close()
+		print "File index.shtml written."
+		print "Operation complete."
 
 	def add_page(self):
 		correct = False
@@ -85,10 +123,10 @@ class Bbqweb(object):
 			f = raw_input("Filename: ")
 			t = raw_input("Title: ")
 			l = raw_input("Link: ")
-			raw_input("Using vim for inserting content. Press ENTER.")	
+			raw_input("Using nano for inserting content. Press ENTER.")	
 			# HACK: convoluted wtf.
 			tmp = NamedTemporaryFile(delete=False)
-			proc = call(['vim', tmp.name])
+			proc = call(['nano', '-w', tmp.name])
 			tmp.close()
 			tmp2 = open(tmp.name, 'rb')
 			c = tmp2.read()
@@ -112,8 +150,35 @@ class Bbqweb(object):
 
 
 	def add_base(self):
-		pass
+		correct = False
+		while not correct:
+			f = raw_input("Name: ")
+			raw_input("Using vim for inserting content. Press ENTER.")	
+			# HACK: convoluted wtf.
+			tmp = NamedTemporaryFile(delete=False)
+			proc = call(['vim', tmp.name])
+			tmp.close()
+			tmp2 = open(tmp.name, 'rb')
+			c = tmp2.read()
+			tmp2.close()
+			os.unlink(tmp.name)
+			assert(os.path.exists(tmp.name) == False)
+			
+			# base here
+			while True:
+				x = raw_input("Is your input correct [Y/N]? ")
+				if x.lower() not in ('y', 'n'):
+					print "Please enter Y or N."
+				elif x.lower() == 'y':
+					correct = True
+					break
+				else: 
+					break
+			if correct:
+				b = Base(f,c)
+				self.session.add(b)
+
 if __name__ == "__main__":
-	if len(sys.argv) > 1:
-		bbqweb = Bbqweb(sys.argv[1])
+	if len(sys.argv) > 2:
+		bbqweb = Bbqweb(sys.argv[1], sys.argv[2])
 		bbqweb.selection()
