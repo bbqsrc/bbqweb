@@ -13,7 +13,7 @@ Requirements
 
 Usage
 -----
-> python <database.db> <path/to/output/html/files>
+    python <database.db> <path/to/output/html/files>
 
 * A menu will appear. 
 * For now, you must add at least one base and call it 'index'
