@@ -53,11 +53,17 @@ class Bbqweb(object):
 			SqlBase.metadata.bind = engine
 			self.session = Session()
 			SqlBase.metadata.create_all()
+		
+			self.outdir = outdir
+			self.templates = TemplateLookup()
+			if len(self.session.query(Base).all()) < 1:
+				print "You have no templates. You should add one now."
+				self.add_base()
+
+			for row in self.session.query(Base):
+				self.templates.put_string(row.name, row.content)
+
 		#except:
-		self.outdir = outdir
-		self.templates = TemplateLookup()
-		for row in self.session.query(Base):
-			self.templates.put_string(row.name, row.content)
 		#	print "Error TODO MAX ERRORS OUT TO THE MAX"
 	def selection(self):
 		select = {
@@ -75,11 +81,13 @@ class Bbqweb(object):
 			print "  (g) generate website"
 			print "  (1) add page"
 			print "  (2) add base"
+			print "  (*) edit page"
+			print "  (*) edit base"
 			print "  (*) show pages"
 			print "  (*) show bases"
 			print "  (q) quit"
 			print ""
-			print "Make a selection: ",
+			print "Make a selection:",
 			select.get(raw_input(), lambda: None)()
 			print ""
 		
@@ -94,7 +102,7 @@ class Bbqweb(object):
 		print "  (1) title"
 		print "  (2) created date"
 		print ""
-		x = raw_input("Selection: ")
+		x = raw_input("Selection:")
 		if x == '1':
 			x = Page.title
 		elif x == '2':
@@ -120,16 +128,16 @@ class Bbqweb(object):
 	def add_page(self):
 		correct = False
 		while not correct:
-			f = raw_input("Filename: ")
-			t = raw_input("Title: ")
-			l = raw_input("Link: ")
+			f = raw_input("Filename: ").strip()
+			t = raw_input("Title: ").strip()
+			l = raw_input("Link: ").strip()
 			raw_input("Using nano for inserting content. Press ENTER.")	
 			# HACK: convoluted wtf.
 			tmp = NamedTemporaryFile(delete=False)
 			proc = call(['nano', '-w', tmp.name])
 			tmp.close()
 			tmp2 = open(tmp.name, 'rb')
-			c = tmp2.read()
+			c = tmp2.read().strip()
 			tmp2.close()
 			os.unlink(tmp.name)
 			assert(os.path.exists(tmp.name) == False)
@@ -147,36 +155,53 @@ class Bbqweb(object):
 			if correct:
 				p = Page(f,t,l,c)
 				self.session.add(p)
+				self.session.commit()
 
 
 	def add_base(self):
 		correct = False
 		while not correct:
-			f = raw_input("Name: ")
-			raw_input("Using vim for inserting content. Press ENTER.")	
+			f = raw_input("Name: ").strip()
+			if len(self.session.query(Base).filter(Base.name==f).all()) > 0:
+				print "This name already exists." 
+				if(not self.yes_no("Continue")):
+					continue
+
+			raw_input("Using nano for inserting content. Press ENTER.")	
 			# HACK: convoluted wtf.
 			tmp = NamedTemporaryFile(delete=False)
-			proc = call(['vim', tmp.name])
+			proc = call(['nano', '-w', tmp.name])
 			tmp.close()
 			tmp2 = open(tmp.name, 'rb')
-			c = tmp2.read()
+			c = tmp2.read().strip()
 			tmp2.close()
 			os.unlink(tmp.name)
 			assert(os.path.exists(tmp.name) == False)
 			
 			# base here
-			while True:
-				x = raw_input("Is your input correct [Y/N]? ")
-				if x.lower() not in ('y', 'n'):
-					print "Please enter Y or N."
-				elif x.lower() == 'y':
-					correct = True
-					break
-				else: 
-					break
+			if self.yes_no("Is your input correct"):
+				correct = True
+
 			if correct:
-				b = Base(f,c)
+				q = self.session.query(Base).filter(Base.name==f).all()
+				b = None
+				if len(q) > 0:
+					b = q[0]
+					b.content = c
+				else:
+					b = Base(f,c)
 				self.session.add(b)
+				self.session.commit()
+
+	def yes_no(self, msg):
+		while True:
+			x = raw_input("%s [Y/N]?" % msg)
+			if x.lower() not in ('y', 'n'):
+				print "Please enter Y or N."
+			elif x.lower() == 'y':
+				return True	
+			else: 
+				return False
 
 if __name__ == "__main__":
 	if len(sys.argv) > 2:
