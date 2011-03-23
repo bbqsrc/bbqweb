@@ -11,8 +11,6 @@ import sys, os
 import readline
 from tempfile import NamedTemporaryFile
 
-# print t.render(rows=[('herp', 'how to herp', 'herp.html'), ('derp', 'how to cunt it up', 'loldicks.html')])
-#engine = sqlalchemy.create_engine('sqlite:///%s' % db)
 SqlBase = declarative_base()
 
 class Base(SqlBase):
@@ -58,8 +56,8 @@ class Bbqweb(object):
 			self.outdir = outdir
 			self.templates = TemplateLookup()
 			if len(self.session.query(Base).all()) < 1:
-				print "You have no templates. You should add one now."
-				self.add_base()
+				print "You have no templates. You must add the index now."
+				self.add_base("index")
 
 			for row in self.session.query(Base):
 				self.templates.put_string(row.name, row.content)
@@ -87,32 +85,40 @@ class Bbqweb(object):
 			
 			'ab': self.add_base,
 			'add base': self.add_base,
-			
+
+			'd': self.delete_page,
+			'delete': self.delete_page,
+
+			#'db': self.delete_base,
+			#'delete base': self.delete_base,
+
 			'e': self.edit_page,
 			'edit': self.edit_page,
 			'edit page': self.edit_page,
 			
-			'eb': lambda: None,
-			'edit base': lambda: None,
+			#'eb': lambda: None,
+			#'edit base': lambda: None,
 
 			's': self.show_pages,
 			'show': self.show_pages,
 			'show pages': self.show_pages,
 			
-			'sb': lambda: None,
-			'show bases': lambda: None
+			#'sb': lambda: None,
+			#'show bases': lambda: None
 		}
 		print "\n> bbqweb alpha."
 		while True:
 			x = raw_input("Make a selection (u for usage): ")
-			select.get(x, invalid)()
 			print ""
+			select.get(x, invalid)()
 	
 	def usage(self):
 		print "> Options:"
 		print " (g)  generate website"
 		print " (a)  add page"
 		print " (ab) add base"
+		print " (d)  delete page"
+		print " (db) delete base"
 		print " (e)  edit page"
 		print " (eb) edit base"
 		print " (s)  show pages"
@@ -139,6 +145,7 @@ class Bbqweb(object):
 		else:
 			print "Poor selection."
 			return
+		
 		t = self.templates.get_template("index")
 		args = []
 		for row in self.session.query(Page).order_by(x):
@@ -146,12 +153,14 @@ class Bbqweb(object):
 			f = open("%s/%s" % (self.outdir, row.file), 'wb')
 			f.write(row.content)
 			f.close()
-			print "File %s written." % row.file
+			print row.file
+		
 		index_content = t.render(rows=args)
 		f = open("%s/index.shtml" % self.outdir, 'wb')
 		f.write(index_content)
 		f.close()
-		print "File index.shtml written."
+		
+		print "index.shtml"
 		print "Operation complete."
 
 	def edit_page(self):
@@ -171,79 +180,94 @@ class Bbqweb(object):
 			tmp.write(q.content)
 			tmp.close()
 			proc = call(['nano', '-w', tmp.name])
+			if self.yes_no("Is your input correct"):
+				correct = True
 			tmp2 = open(tmp.name, 'rb')
 			c = tmp2.read().strip()
 			tmp2.close()
 			os.unlink(tmp.name)
 			assert(os.path.exists(tmp.name) == False)
 			
-			if self.yes_no("Is your input correct"):
-				correct = True
-
 			if correct:
 				q.content = c
 				self.session.add(q)
+				print "Page '%s' edited successfully\n--" % q.link
 			
 	def show_pages(self):
 		print "> Pages:"
 		for i, row in enumerate(self.session.query(Page).all()):
 			print " %d. %s" % (i, row.link)
 
-	def add_page(self):
+	def add_page(self, f=None, t=None, l=None, c=None, b=None):
 		correct = False
 		while not correct:
-			f = raw_input("Filename: ").strip()
-			t = raw_input("Title: ").strip()
-			l = raw_input("Link: ").strip()
-			raw_input("Using nano for inserting content. Press ENTER.")	
-			# HACK: convoluted wtf.
-			tmp = NamedTemporaryFile(delete=False)
-			proc = call(['nano', '-w', tmp.name])
-			tmp.close()
-			tmp2 = open(tmp.name, 'rb')
-			c = tmp2.read().strip()
-			tmp2.close()
-			os.unlink(tmp.name)
-			assert(os.path.exists(tmp.name) == False)
+			if not f:
+				f = raw_input("Filename: ").strip()
+			if not t:
+				t = raw_input("Title: ").strip()
+			if not l:
+				l = raw_input("Link: ").strip()
+			if not b:
+				while True:
+					b = raw_input("Base [index]: ").strip()
+					if b == "":
+						b = "index"
+						break
+					
+					q = self.session.query(Base).filter(Base.name==b).all()
+					if len(q) > 0:
+						b = q[0].name
+						break	
+			
+			if not c:
+				#raw_input("Using nano for inserting content. Press ENTER.")	
+				# HACK: convoluted wtf.
+				tmp = NamedTemporaryFile(delete=False)
+				tmp.write("Add your content here.")
+				tmp.close()
+				proc = call(['nano', '-w', tmp.name])
+				if self.yes_no("Is your input correct?"):
+					correct = True
+				tmp2 = open(tmp.name, 'rb')
+				c = tmp2.read().strip()
+				tmp2.close()
+				os.unlink(tmp.name)
+				assert(os.path.exists(tmp.name) == False)
 			
 			# base here
-			while True:
-				x = raw_input("Is your input correct [Y/N]? ")
-				if x.lower() not in ('y', 'n'):
-					print "Please enter Y or N."
-				elif x.lower() == 'y':
-					correct = True
-					break
-				else: 
-					break
+			
 			if correct:
 				p = Page(f,t,l,c)
 				self.session.add(p)
+				print "Page '%s' successfully added.\n--" % p.link
 
 
-	def add_base(self):
+	def add_base(self, f=None, c=None):
 		correct = False
 		while not correct:
-			f = raw_input("Name: ").strip()
+			if not f:
+				f = raw_input("Name: ").strip()
 			if len(self.session.query(Base).filter(Base.name==f).all()) > 0:
 				print "This name already exists." 
 				if(not self.yes_no("Continue")):
 					continue
-
-			raw_input("Using nano for inserting content. Press ENTER.")	
-			# HACK: convoluted wtf.
-			tmp = NamedTemporaryFile(delete=False)
-			proc = call(['nano', '-w', tmp.name])
-			tmp.close()
-			tmp2 = open(tmp.name, 'rb')
-			c = tmp2.read().strip()
-			tmp2.close()
-			os.unlink(tmp.name)
-			assert(os.path.exists(tmp.name) == False)
+			
+			if not c:
+				#raw_input("Using nano for inserting content. Press ENTER.")	
+				# HACK: convoluted wtf.
+				tmp = NamedTemporaryFile(delete=False)
+				tmp.write("Add your content here.")
+				tmp.close()	
+				proc = call(['nano', '-w', tmp.name])
+				if self.yes_no("Is your input correct"):
+					correct = True
+				tmp2 = open(tmp.name, 'rb')
+				c = tmp2.read().strip()
+				tmp2.close()
+				os.unlink(tmp.name)
+				assert(os.path.exists(tmp.name) == False)
 			
 			# base here
-			if self.yes_no("Is your input correct"):
-				correct = True
 
 			if correct:
 				q = self.session.query(Base).filter(Base.name==f).all()
@@ -254,10 +278,22 @@ class Bbqweb(object):
 				else:
 					b = Base(f,c)
 				self.session.add(b)
+				print "Base '%s' successfully added.\n--" % b.name
+
+	def delete_page(self, l=None):
+		if not l:
+			l = raw_input("Link: ")
+		q = self.session.query(Page).filter(Page.link==l).all()
+		if len(q) > 0 and q[0].link == l:
+			if self.yes_no("Are you sure you want to delete '%s'" % l):
+				self.session.delete(q[0])
+				print "Page '%s' deleted successfully.\n--" % l
+		else:
+			print "'%s' does not exist." % l
 
 	def yes_no(self, msg):
 		while True:
-			x = raw_input("%s [Y/N]? " % msg)
+			x = raw_input("%s [Y/N]? " % msg).strip()[0]
 			if x.lower() not in ('y', 'n'):
 				print "Please enter Y or N."
 			elif x.lower() == 'y':
@@ -269,3 +305,6 @@ if __name__ == "__main__":
 	if len(sys.argv) > 2:
 		bbqweb = Bbqweb(sys.argv[1], sys.argv[2])
 		bbqweb.selection()
+	else:
+		print "bbqweb alpha."
+		print "Usage: %s <sqlite.db> <output_dir>" % sys.argv[0]
