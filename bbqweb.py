@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker, scoped_session
 from subprocess import *
 import datetime
 import sys, os
+import readline
 from tempfile import NamedTemporaryFile
 
 # print t.render(rows=[('herp', 'how to herp', 'herp.html'), ('derp', 'how to cunt it up', 'loldicks.html')])
@@ -49,7 +50,7 @@ class Bbqweb(object):
 		# TODO: add base check, enforce adding base
 		if True:
 			engine = create_engine("sqlite:///%s" % db)
-			Session = sessionmaker(bind=engine)
+			Session = sessionmaker(bind=engine, autoflush=True, autocommit=True)
 			SqlBase.metadata.bind = engine
 			self.session = Session()
 			SqlBase.metadata.create_all()
@@ -66,43 +67,71 @@ class Bbqweb(object):
 		#except:
 		#	print "Error TODO MAX ERRORS OUT TO THE MAX"
 	def selection(self):
+		def invalid():
+			print "Invalid selection."
+
 		select = {
+			'u': self.usage,
+			'usage': self.usage,
+			
 			'g': self.generate,
-			'1': self.add_page,
-			'2': self.add_base,
-			'q': self.conclude
+			'generate': self.generate,
+			
+			'q': self.conclude,
+			'quit': self.conclude,
+			'exit': self.conclude,
+			
+			'a': self.add_page,
+			'add': self.add_page,
+			'add page': self.add_page,
+			
+			'ab': self.add_base,
+			'add base': self.add_base,
+			
+			'e': self.edit_page,
+			'edit': self.edit_page,
+			'edit page': self.edit_page,
+			
+			'eb': lambda: None,
+			'edit base': lambda: None,
+
+			's': self.show_pages,
+			'show': self.show_pages,
+			'show pages': self.show_pages,
+			
+			'sb': lambda: None,
+			'show bases': lambda: None
 		}
+		print "\n> bbqweb alpha."
 		while True:
-			print "-------------"
-			print "bbqweb alpha."
-			print "-------------"
+			x = raw_input("Make a selection (u for usage): ")
+			select.get(x, invalid)()
 			print ""
-			print "Options:"
-			print "  (g) generate website"
-			print "  (1) add page"
-			print "  (2) add base"
-			print "  (*) edit page"
-			print "  (*) edit base"
-			print "  (*) show pages"
-			print "  (*) show bases"
-			print "  (q) quit"
-			print ""
-			print "Make a selection:",
-			select.get(raw_input(), lambda: None)()
-			print ""
-		
+	
+	def usage(self):
+		print "> Options:"
+		print " (g)  generate website"
+		print " (a)  add page"
+		print " (ab) add base"
+		print " (e)  edit page"
+		print " (eb) edit base"
+		print " (s)  show pages"
+		print " (sb) show bases"
+		print " (q)  quit"
+
+
 	def conclude(self):
-		self.session.commit()
+		#self.session.commit()
 		self.session.close()
 		sys.exit()
 
 	def generate(self):
 		#TODO outdir checks
-		print "Order by:"
-		print "  (1) title"
-		print "  (2) created date"
+		print "> Order by:"
+		print " (1) title"
+		print " (2) created date"
 		print ""
-		x = raw_input("Selection:")
+		x = raw_input("Selection: ")
 		if x == '1':
 			x = Page.title
 		elif x == '2':
@@ -124,6 +153,40 @@ class Bbqweb(object):
 		f.close()
 		print "File index.shtml written."
 		print "Operation complete."
+
+	def edit_page(self):
+		correct = False
+		while not correct:
+			f = raw_input("Link: ").strip()
+			if f == 'q':
+				break
+			q = self.session.query(Page).filter(Page.link==f).all()
+			if len(q) > 0:
+				q = q[0]
+			else:
+				print "Does not exist. Try again."
+				continue
+
+			tmp = NamedTemporaryFile(delete=False)
+			tmp.write(q.content)
+			tmp.close()
+			proc = call(['nano', '-w', tmp.name])
+			tmp2 = open(tmp.name, 'rb')
+			c = tmp2.read().strip()
+			tmp2.close()
+			os.unlink(tmp.name)
+			assert(os.path.exists(tmp.name) == False)
+			
+			if self.yes_no("Is your input correct"):
+				correct = True
+
+			if correct:
+				self.session.add(q)
+			
+	def show_pages(self):
+		print "> Pages:"
+		for i, row in enumerate(self.session.query(Page).all()):
+			print " %d. %s" % (i, row.link)
 
 	def add_page(self):
 		correct = False
@@ -155,7 +218,6 @@ class Bbqweb(object):
 			if correct:
 				p = Page(f,t,l,c)
 				self.session.add(p)
-				self.session.commit()
 
 
 	def add_base(self):
@@ -191,11 +253,10 @@ class Bbqweb(object):
 				else:
 					b = Base(f,c)
 				self.session.add(b)
-				self.session.commit()
 
 	def yes_no(self, msg):
 		while True:
-			x = raw_input("%s [Y/N]?" % msg)
+			x = raw_input("%s [Y/N]? " % msg)
 			if x.lower() not in ('y', 'n'):
 				print "Please enter Y or N."
 			elif x.lower() == 'y':
