@@ -181,6 +181,7 @@ class Bbqweb(object):
 				correct = True
 
 			if correct:
+				q.content = c
 				self.session.add(q)
 			
 	def show_pages(self):
