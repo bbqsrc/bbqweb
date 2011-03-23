@@ -7,11 +7,22 @@ from sqlalchemy.orm import sessionmaker, scoped_session
 
 from subprocess import *
 import datetime
-import sys, os
+import sys, os, os.path
+from glob import glob
 import readline
 from tempfile import NamedTemporaryFile
 
 SqlBase = declarative_base()
+
+class Config(SqlBase):
+	__tablename__ = "config"
+
+	key = Column(String, nullable=False, primary_key=True)
+	value = Column(String)
+
+	def __init__(self, key, value):
+		self.key = key
+		self.value = value
 
 class Base(SqlBase):
 	__tablename__ = "bases"
@@ -54,22 +65,32 @@ class Bbqweb(object):
 			SqlBase.metadata.create_all()
 		
 			self.outdir = outdir
-			self.templates = TemplateLookup()
-			if len(self.session.query(Base).all()) < 1:
-				print "You have no templates. You must add the index now."
-				self.add_base("index")
+			if not os.path.isdir(outdir):
+				os.mkdir(outdir) #TODO sanitise, etc
 
+			self.templates = TemplateLookup()
+			self.db_init()
 			for row in self.session.query(Base):
 				self.templates.put_string(row.name, row.content)
-
 		#except:
 		#	print "Error TODO MAX ERRORS OUT TO THE MAX"
+	
+	def db_init(self):
+		if len(self.session.query(Base).all()) < 1:
+			print "You have no templates. You must add the index now."
+			self.add_base("index")
+		q = self.session.query(Config).filter(Config.key=="scpdir").all()
+		conf = None
+		if len(q) < 1:
+			conf = Config("scpdir", None)
+			self.session.add(conf)
+
 	def selection(self):
 		def invalid():
 			print "Invalid selection."
 
 		select = {
-			'u': self.usage,
+			'?': self.usage,
 			'usage': self.usage,
 			
 			'g': self.generate,
@@ -89,40 +110,44 @@ class Bbqweb(object):
 			'd': self.delete_page,
 			'delete': self.delete_page,
 
-			#'db': self.delete_base,
-			#'delete base': self.delete_base,
+			'db': self.delete_base,
+			'delete base': self.delete_base,
 
 			'e': self.edit_page,
 			'edit': self.edit_page,
 			'edit page': self.edit_page,
 			
-			#'eb': lambda: None,
-			#'edit base': lambda: None,
+			'eb': self.edit_base,
+			'edit base': self.edit_base,
 
 			's': self.show_pages,
 			'show': self.show_pages,
 			'show pages': self.show_pages,
 			
-			#'sb': lambda: None,
-			#'show bases': lambda: None
+			'sb': self.show_bases,
+			'show bases': self.show_bases,
+
+			'u': self.upload,
+			'upload': self.upload
 		}
 		print "\n> bbqweb alpha."
 		while True:
-			x = raw_input("Make a selection (u for usage): ")
+			x = raw_input("Make a selection (? for usage): ")
 			print ""
 			select.get(x, invalid)()
 	
 	def usage(self):
 		print "> Options:"
-		print " (g)  generate website"
 		print " (a)  add page"
 		print " (ab) add base"
 		print " (d)  delete page"
 		print " (db) delete base"
 		print " (e)  edit page"
 		print " (eb) edit base"
+		print " (g)  generate website"
 		print " (s)  show pages"
 		print " (sb) show bases"
+		print " (u)  upload using SCP"
 		print " (q)  quit"
 
 
@@ -145,15 +170,15 @@ class Bbqweb(object):
 		else:
 			print "Poor selection."
 			return
-		
-		t = self.templates.get_template("index")
-		args = []
-		for row in self.session.query(Page).order_by(x):
-			args.append([row.link, row.title, row.file])
-			f = open("%s/%s" % (self.outdir, row.file), 'wb')
-			f.write(row.content)
-			f.close()
-			print row.file
+		for b in self.session.query(Base):
+			t = self.templates.get_template(b.name)
+			args = []
+			for row in self.session.query(Page).filter(Page.base==b.name).order_by(x):
+				args.append([row.link, row.title, row.file])
+				f = open("%s/%s" % (self.outdir, row.file), 'wb')
+				f.write(row.content)
+				f.close()
+				print row.file
 		
 		index_content = t.render(rows=args)
 		f = open("%s/index.shtml" % self.outdir, 'wb')
@@ -162,11 +187,24 @@ class Bbqweb(object):
 		
 		print "index.shtml"
 		print "Operation complete."
+	
+	def upload(self, dest=None):
+		q = self.session.query(Config).filter(Config.key=="scpdir").one()
+		if not dest:
+			dest = raw_input("Destination [%s]: " % q.value).strip()
+			if not dest and q.value:
+				dest = q.value
+		if dest:
+			q.value = dest
+			self.session.add(q)
+			os.chdir(os.path.realpath(self.outdir))
+			proc = call(['scp'] + glob("*") + [dest])
 
-	def edit_page(self):
+	def edit_page(self, f=None, c=None):
 		correct = False
 		while not correct:
-			f = raw_input("Link: ").strip()
+			if not f:
+				f = raw_input("Link: ").strip()
 			if f == 'q':
 				break
 			q = self.session.query(Page).filter(Page.link==f).all()
@@ -175,29 +213,67 @@ class Bbqweb(object):
 			else:
 				print "Does not exist. Try again."
 				continue
-
-			tmp = NamedTemporaryFile(delete=False)
-			tmp.write(q.content)
-			tmp.close()
-			proc = call(['nano', '-w', tmp.name])
-			if self.yes_no("Is your input correct"):
-				correct = True
-			tmp2 = open(tmp.name, 'rb')
-			c = tmp2.read().strip()
-			tmp2.close()
-			os.unlink(tmp.name)
-			assert(os.path.exists(tmp.name) == False)
+			
+			if not c:
+				tmp = NamedTemporaryFile(delete=False)
+				tmp.write(q.content)
+				tmp.close()
+				proc = call(['nano', '-w', tmp.name])
+				if self.yes_no("Is your input correct"):
+					correct = True
+				tmp2 = open(tmp.name, 'rb')
+				c = tmp2.read().strip()
+				tmp2.close()
+				os.unlink(tmp.name)
+				assert(os.path.exists(tmp.name) == False)
 			
 			if correct:
 				q.content = c
 				self.session.add(q)
 				print "Page '%s' edited successfully\n--" % q.link
+	
+	def edit_base(self, n=None, c=None):
+		correct = False
+		while not correct:
+			if not n:
+				n = raw_input("Name: ").strip()
+			if n == 'q':
+				break
+			q = self.session.query(Base).filter(Base.name==n).all()
+			if len(q) > 0:
+				q = q[0]
+			else:
+				print "Base '%s' does not exist. Try again." % f
+				continue
+			
+			if not c:
+				tmp = NamedTemporaryFile(delete=False)
+				tmp.write(q.content)
+				tmp.close()
+				proc = call(['nano', '-w', tmp.name])
+				if self.yes_no("Is your input correct"):
+					correct = True
+				tmp2 = open(tmp.name, 'rb')
+				c = tmp2.read().strip()
+				tmp2.close()
+				os.unlink(tmp.name)
+				assert(os.path.exists(tmp.name) == False)
+			
+			if correct:
+				q.content = c
+				self.session.add(q)
+				print "Base '%s' edited successfully\n--" % q.name
 			
 	def show_pages(self):
 		print "> Pages:"
 		for i, row in enumerate(self.session.query(Page).all()):
 			print " %d. %s" % (i, row.link)
 
+	def show_bases(self):
+		print "> Bases:"
+		for i, row in enumerate(self.session.query(Base).all()):
+			print " %d. %s" % (i, row.name)
+	
 	def add_page(self, f=None, t=None, l=None, c=None, b=None):
 		correct = False
 		while not correct:
@@ -237,7 +313,7 @@ class Bbqweb(object):
 			# base here
 			
 			if correct:
-				p = Page(f,t,l,c)
+				p = Page(f,t,l,c,b)
 				self.session.add(p)
 				print "Page '%s' successfully added.\n--" % p.link
 
@@ -290,6 +366,17 @@ class Bbqweb(object):
 				print "Page '%s' deleted successfully.\n--" % l
 		else:
 			print "'%s' does not exist." % l
+
+	def delete_base(self, n=None):
+		if not n:
+			n = raw_input("Name: ")
+		q = self.session.query(Base).filter(Base.name==n).all()
+		if len(q) > 0 and q[0].name == n:
+			if self.yes_no("Are you sure you want to delete '%s'" % n):
+				self.session.delete(q[0])
+				print "Page '%s' deleted successfully.\n--" % n
+		else:
+			print "'%s' does not exist." % n
 
 	def yes_no(self, msg):
 		while True:
